@@ -16,7 +16,7 @@ package chubaofs
 import (
 	"context"
 	"fmt"
-	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog"
@@ -24,7 +24,7 @@ import (
 )
 
 type controllerServer struct {
-	*csi.UnimplementedControllerServer
+	UnimplementedControllerServer
 	caps   []*csi.ControllerServiceCapability
 	driver *driver
 }
@@ -64,9 +64,11 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	klog.V(0).Infof("create volume:%v success.", volumeId)
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			VolumeId:      volumeId,
+			Id:            volumeId,
 			CapacityBytes: capacity,
-			VolumeContext: params,
+			Attributes: map[string]string{
+				"volName": volumeId,
+			},
 		},
 	}, err
 }
@@ -125,14 +127,8 @@ func (cs *controllerServer) ValidateVolumeCapabilities(ctx context.Context, req 
 			return nil, status.Error(codes.InvalidArgument, "no multi node multi writer capability")
 		}
 	}
-
-	return &csi.ValidateVolumeCapabilitiesResponse{
-		Confirmed: &csi.ValidateVolumeCapabilitiesResponse_Confirmed{
-			VolumeContext:      req.GetVolumeContext(),
-			VolumeCapabilities: req.GetVolumeCapabilities(),
-			Parameters:         req.GetParameters(),
-		},
-	}, nil
+	
+	return &csi.ValidateVolumeCapabilitiesResponse{Supported: true, Message: ""}, nil
 }
 
 func (cs *controllerServer) validateControllerServiceRequest(c csi.ControllerServiceCapability_RPC_Type) error {

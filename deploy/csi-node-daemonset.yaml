@@ -46,6 +46,8 @@ spec:
   selector:
     matchLabels:
       app: chubaofs-csi-node
+  updateStrategy:
+    type: OnDelete
   template:
     metadata:
       labels:

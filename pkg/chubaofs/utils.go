@@ -15,6 +15,7 @@ package chubaofs
 
 import (
 	"fmt"
+	"k8s.io/utils/mount"
 	"net"
 	"os"
 	"strings"
@@ -54,4 +55,11 @@ func PathExists(path string) bool {
 		return false
 	}
 	return false
+}
+
+// return true if mount
+func HasMount(targetPath string) (bool, error) {
+	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
+	// notMnt is false if the target path has been mount
+	return !notMnt, err
 }

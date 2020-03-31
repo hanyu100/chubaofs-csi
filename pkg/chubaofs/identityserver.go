@@ -14,12 +14,12 @@
 package chubaofs
 
 import (
-	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"golang.org/x/net/context"
 )
 
 type identityServer struct {
-	*csi.UnimplementedIdentityServer
+	UnimplementedIdentityServer
 	name    string
 	version string
 	driver  *driver

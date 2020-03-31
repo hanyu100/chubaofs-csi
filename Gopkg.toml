@@ -27,7 +27,7 @@
 
 [[constraint]]
   name = "github.com/container-storage-interface/spec"
-  version = "1.2.0"
+  version = "0.3.0"
 
 [[constraint]]
   name = "github.com/kubernetes-csi/csi-lib-utils"

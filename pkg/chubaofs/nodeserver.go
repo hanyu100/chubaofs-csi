@@ -15,7 +15,7 @@ package chubaofs
 
 import (
 	"fmt"
-	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -24,7 +24,7 @@ import (
 )
 
 type nodeServer struct {
-	*csi.UnimplementedNodeServer
+	UnimplementedNodeServer
 	nodeID string
 	driver *driver
 }
@@ -37,18 +37,24 @@ func NewNodeServer(driver *driver) *nodeServer {
 }
 
 func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+	targetPath := req.GetTargetPath()
+	hasMount, err := HasMount(targetPath)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	if hasMount {
+		return &csi.NodePublishVolumeResponse{}, nil
+	}
+
 	volumeId := req.GetVolumeId()
-	param := req.GetVolumeContext()
+	param := req.GetVolumeAttributes()
 	cfsServer, err := newCfsServer(volumeId, param)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	if PathExists(cfsServer.clientConfFile) {
-		return &csi.NodePublishVolumeResponse{}, nil
-	}
-
-	err = cfsServer.persistClientConf(req.GetTargetPath())
+	err = cfsServer.persistClientConf(targetPath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "persist client config file fail, err: %v", err)
 	}
