@@ -7,6 +7,8 @@ package context_test
 import (
 	"fmt"
 	"time"
+
+	"golang.org/x/net/context"
 )
 
 // This example passes a context with a timeout to tell a blocking function that
@@ -14,7 +16,7 @@ import (
 func ExampleWithTimeout() {
 	// Pass a context with a timeout to tell a blocking function that it
 	// should abandon its work after the timeout elapses.
-	ctx, cancel := WithTimeout(Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	select {

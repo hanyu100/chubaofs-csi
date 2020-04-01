@@ -18,21 +18,15 @@ package cfs
 
 import (
 	"encoding/json"
-	"os"
-	"os/exec"
-	"path"
-	"strings"
-
+	"github.com/chubaofs/chubaofs-csi/pkg/csi-common"
 	"github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"k8s.io/kubernetes/pkg/util/mount"
-	"k8s.io/kubernetes/pkg/volume/util"
-
-	"github.com/chubaofs/chubaofs-csi/pkg/csi-common"
-	"github.com/golang/glog"
-	"time"
+	"io/ioutil"
+	"k8s.io/klog"
+	"os"
+	"path"
 )
 
 type nodeServer struct {
@@ -51,46 +45,67 @@ func WriteBytes(filePath string, b []byte) (int, error) {
 }
 
 func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
-	glog.V(2).Infof("-----2----NodePublishVolume req:%v", req)
+	stagingTargetPath := req.GetStagingTargetPath()
 	targetPath := req.GetTargetPath()
-	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			if err := os.MkdirAll(targetPath, 0750); err != nil {
-				glog.Errorf("Create path:%v to mount is failed. err:%v", targetPath, err)
-				return nil, status.Error(codes.Internal, err.Error())
-			}
-			notMnt = true
-		} else {
-			glog.Errorf("Mount path:%v is failed. err:%v", targetPath, err)
-			return nil, status.Error(codes.Internal, err.Error())
-		}
+	if err := createMountPoint(targetPath); err != nil {
+		klog.Errorf("failed to create mount point at %s: %v", targetPath, err)
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	if !notMnt {
-		glog.Infof("Mount path: %s is already mounted", targetPath)
+	hasMount, err := isMountPoint(targetPath)
+	if err != nil {
+		klog.Errorf("check mount status error, %v", err)
+		return nil, status.Errorf(codes.Internal, "check mount status error, %v", err)
+	}
+
+	if hasMount {
 		return &csi.NodePublishVolumeResponse{}, nil
 	}
 
-	mo := req.GetVolumeCapability().GetMount().GetMountFlags()
-	if req.GetReadonly() {
-		mo = append(mo, "ro")
+	err = bindMount(stagingTargetPath, targetPath)
+	if err != nil {
+		klog.Errorf("mount -bind stagingTargetPath[%v] to targetPath[%v], %v", stagingTargetPath, targetPath, err)
+		return nil, status.Errorf(codes.Internal, "check mount status error, %v", err)
 	}
 
-	master := ns.masterAddress
-	volName := req.VolumeId
-	podUUID := strings.Split(targetPath, "/")
+	return &csi.NodePublishVolumeResponse{}, nil
+}
+
+func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+	targetPath := req.GetTargetPath()
+	err := umountVolume(targetPath)
+	if err != nil {
+		klog.Errorf("umount targetPath[%v] fail, %v", targetPath, err)
+		return nil, status.Errorf(codes.Internal, "umount targetPath[%v] fail, %v", targetPath, err)
+	}
+
+	_ = os.Remove(targetPath)
+	return &csi.NodeUnpublishVolumeResponse{}, nil
+}
+
+func (ns *nodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+	stagingTargetPath := req.GetStagingTargetPath()
+	volumeName := req.GetVolumeId()
+	err := createMountPoint(stagingTargetPath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "create stagingTargetPath[%v] fail, %v", stagingTargetPath, err)
+	}
+
+	hasMount, err := isMountPoint(stagingTargetPath)
+	if err != nil {
+		klog.Errorf("check mount status error, %v", err)
+		return nil, status.Errorf(codes.Internal, "check mount status error, %v", err)
+	}
+
+	if hasMount {
+		return &csi.NodeStageVolumeResponse{}, nil
+	}
 
 	cfgmap := make(map[string]interface{})
-	cfgmap[FUSE_KEY_MOUNT_POINT] = targetPath
-	cfgmap[FUSE_KEY_VOLUME_NAME] = volName
-	cfgmap[FUSE_KEY_MASTER_ADDR] = master
-	logPath := "/cfs/logs/" + podUUID[4] + "/" + volName + "/" + podUUID[7] + "/"
-	if err := os.MkdirAll(logPath, 0750); err != nil {
-		glog.Errorf("Create log path:%v failed. err:%v", logPath, err)
-		return nil, status.Error(codes.Internal, err.Error())
-	}
-	cfgmap[FUSE_KEY_LOG_PATH] = logPath
+	cfgmap[FUSE_KEY_MOUNT_POINT] = stagingTargetPath
+	cfgmap[FUSE_KEY_VOLUME_NAME] = volumeName
+	cfgmap[FUSE_KEY_MASTER_ADDR] = ns.masterAddress
+	cfgmap[FUSE_KEY_LOG_PATH] = "/cfs/conf/" + volumeName
 	cfgmap[FUSE_KEY_LOG_LEVEL] = "error"
 	cfgmap[FUSE_KEY_LOOKUP_VALID] = "30"
 	cfgmap[FUSE_KEY_OWNER] = "cfs"
@@ -104,74 +119,30 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	cfgmap[FUSE_KEY_WRITE_CACHE] = "false"
 	cfgmap[FUSE_KEY_KEEP_CACHE] = "false"
 
+	configFilePath := "/cfs/conf/" + volumeName
 	cfgstr, err := json.MarshalIndent(cfgmap, "", "      ")
+	err = ioutil.WriteFile(configFilePath, cfgstr, 0444)
 	if err != nil {
-		glog.Errorf("cfs client cfg map to json err:%v \n", err)
-		return &csi.NodePublishVolumeResponse{}, err
+		return nil, status.Errorf(codes.Internal, "create client config file fail. err: %v", err)
 	}
 
-	fuseConfigPath := CFS_FUSE_CONFIG_PATH + podUUID[4] + "/" + volName + "/" + podUUID[7] + "_fuse.json"
-	WriteBytes(fuseConfigPath, cfgstr)
-	glog.V(4).Infof("Parameters of cfs-client is %v", string(cfgstr))
-
-	var (
-		cmdErrChan = make(chan error)
-		cmdErr     error
-		cmd        = exec.Command("/cfs/bin/cfs-client", "-c", fuseConfigPath)
-	)
-	go func() {
-		glog.V(4).Infof("In background do /cfs/bin/cfs-client -c %v", fuseConfigPath)
-		if err := cmd.Run(); err != nil {
-			glog.Errorf("cfs client exec is failed. err:%v", err)
-			cmdErrChan <- err
-			return
-		}
-		glog.Error("cfs client exec had existed")
-	}()
-	select {
-	case cmdErr = <-cmdErrChan:
-	case <-time.After(5 * time.Second):
-		glog.V(2).Infof("cfs client had started. mount volume:%v success", volName)
-	}
-	if cmdErr != nil {
-		glog.Error(cmdErr)
-		return nil, status.Error(codes.Internal, cmdErr.Error())
+	klog.V(0).Infof("create client config file success, volumeId:%v", volumeName)
+	if err = mountVolume(configFilePath); err != nil {
+		klog.Errorf("mount fail, err: %v", err)
+		return nil, status.Errorf(codes.Internal, "mount fail, err: %v", err)
 	}
 
-	return &csi.NodePublishVolumeResponse{}, nil
-}
-
-func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
-	glog.V(2).Infof("---------NodeUnpublishVolume req:%v", req)
-	targetPath := req.GetTargetPath()
-	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
-
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, status.Error(codes.NotFound, "Targetpath not found")
-		} else {
-			return nil, status.Error(codes.Internal, err.Error())
-		}
-	}
-	//assuming success if already unmounted
-	if notMnt {
-		return &csi.NodeUnpublishVolumeResponse{}, nil
-	}
-
-	err = util.UnmountPath(req.GetTargetPath(), mount.New(""))
-	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
-	}
-
-	return &csi.NodeUnpublishVolumeResponse{}, nil
-}
-
-func (ns *nodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
-	glog.V(2).Infof("---------NodeStageVolume req:%v", req)
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
 func (ns *nodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
-	glog.V(2).Infof("---------NodeUnstageVolume req:%v", req)
+	stagingTargetPath := req.GetStagingTargetPath()
+	err := umountVolume(stagingTargetPath)
+	if err != nil {
+		klog.Errorf("umount stagingTargetPath[%v] fail, %v", stagingTargetPath, err)
+		return nil, status.Errorf(codes.Internal, "umount stagingTargetPath[%v] fail, %v", stagingTargetPath, err)
+	}
+
+	_ = os.Remove(stagingTargetPath)
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
