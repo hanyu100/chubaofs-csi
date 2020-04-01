@@ -1,6 +1,6 @@
 # ChubaoFS CSI Makefile
 
-IMAGE_TAG=chubaofs/cfs-csi-driver:1.0.2
+IMAGE_TAG=chubaofs/cfs-csi-driver:1.0.5
 
 .PHONY: all build image push clean
 

@@ -18,6 +18,7 @@ import (
 	"k8s.io/utils/mount"
 	"net"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -46,20 +47,37 @@ func getFreePort(defaultPort int) (int, error) {
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
-func PathExists(path string) bool {
-	_, err := os.Stat(path)
-	if err == nil {
-		return true
-	}
-	if os.IsNotExist(err) {
-		return false
-	}
-	return false
+func createMountPoint(root string) error {
+	return os.MkdirAll(root, 0750)
 }
 
 // return true if mount
-func hasMount(targetPath string) (bool, error) {
+func isMountPoint(targetPath string) (bool, error) {
 	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
 	// notMnt is false if the target path has been mount
 	return !notMnt, err
+}
+
+func bindMount(stagingTargetPath string, targetPath string) error {
+	if _, err := execCommand("mount", "--bind", stagingTargetPath, targetPath); err != nil {
+		return fmt.Errorf("mount --bind %s to %s fail: %v", stagingTargetPath, targetPath, err)
+	}
+	return nil
+}
+
+func mountVolume(cs *cfsServer) error {
+	_, err := execCommand(CfsClientBin, "-c", cs.clientConfFile)
+	return err
+}
+
+func umountVolume(path string) error {
+	if _, err := execCommand("umount", path); err != nil {
+		return fmt.Errorf("umount %s fail: %v", path, err)
+	}
+	return nil
+}
+
+func execCommand(command string, args ...string) ([]byte, error) {
+	cmd := exec.Command(command, args...)
+	return cmd.CombinedOutput()
 }

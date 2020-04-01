@@ -46,6 +46,8 @@ spec:
   selector:
     matchLabels:
       app: chubaofs-csi-node
+  updateStrategy:
+    type: OnDelete
   template:
     metadata:
       labels:
@@ -71,7 +73,7 @@ spec:
             - name: socket-dir
               mountPath: /csi
         - name: node
-          image: chubaofs/cfs-csi-driver:1.0.2
+          image: chubaofs/cfs-csi-driver:1.0.6
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true

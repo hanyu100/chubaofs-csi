@@ -11,7 +11,6 @@ import (
 	"k8s.io/klog"
 	"net/http"
 	"os"
-	"os/exec"
 )
 
 const (
@@ -179,15 +178,4 @@ func (cs *cfsServer) executeRequest(url string) (*cfsServerResponse, error) {
 		return nil, status.Errorf(codes.Unavailable, "unmarshal http response body, url(%v) msg(%v) err(%v)", url, resp.Msg, err)
 	}
 	return resp, nil
-}
-
-func (cs *cfsServer) runClient() error {
-	cmd := exec.Command(CfsClientBin, "-c", cs.clientConfFile)
-	msg, err := cmd.CombinedOutput()
-	if err != nil {
-		return err
-	}
-
-	klog.V(5).Info("cfs-client execute output:%v", msg)
-	return nil
 }

@@ -19,7 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog"
-	"k8s.io/utils/mount"
+	"os"
 )
 
 type nodeServer struct {
@@ -37,8 +37,14 @@ func NewNodeServer(driver *driver) *nodeServer {
 
 func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
 	klog.Infof("NodePublishVolume req:%v", req)
+	stagingTargetPath := req.GetStagingTargetPath()
 	targetPath := req.GetTargetPath()
-	hasMount, err := hasMount(targetPath)
+	if err := createMountPoint(targetPath); err != nil {
+		klog.Errorf("failed to create mount point at %s: %v", targetPath, err)
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	hasMount, err := isMountPoint(targetPath)
 	if err != nil {
 		klog.Errorf("check mount status error, %v", err)
 		return nil, status.Errorf(codes.Internal, "check mount status error, %v", err)
@@ -46,6 +52,46 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
 	if hasMount {
 		return &csi.NodePublishVolumeResponse{}, nil
+	}
+
+	err = bindMount(stagingTargetPath, targetPath)
+	if err != nil {
+		klog.Errorf("mount -bind stagingTargetPath[%v] to targetPath[%v], %v", stagingTargetPath, targetPath, err)
+		return nil, status.Errorf(codes.Internal, "check mount status error, %v", err)
+	}
+
+	return &csi.NodePublishVolumeResponse{}, nil
+}
+
+func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+	klog.Infof("NodeUnpublishVolume req:%v", req)
+	targetPath := req.GetTargetPath()
+	err := umountVolume(targetPath)
+	if err != nil {
+		klog.Errorf("umount targetPath[%v] fail, %v", targetPath, err)
+		return nil, status.Errorf(codes.Internal, "umount targetPath[%v] fail, %v", targetPath, err)
+	}
+
+	_ = os.Remove(targetPath)
+	return &csi.NodeUnpublishVolumeResponse{}, nil
+}
+
+func (ns *nodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+	klog.Infof("NodeStageVolume req:%v", req)
+	stagingTargetPath := req.GetStagingTargetPath()
+	err := createMountPoint(stagingTargetPath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "create stagingTargetPath[%v] fail, %v", stagingTargetPath, err)
+	}
+
+	hasMount, err := isMountPoint(stagingTargetPath)
+	if err != nil {
+		klog.Errorf("check mount status error, %v", err)
+		return nil, status.Errorf(codes.Internal, "check mount status error, %v", err)
+	}
+
+	if hasMount {
+		return &csi.NodeStageVolumeResponse{}, nil
 	}
 
 	volumeId := req.GetVolumeId()
@@ -56,51 +102,30 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return nil, status.Errorf(codes.InvalidArgument, "new cfs server error, %v", err)
 	}
 
-	err = cfsServer.persistClientConf(req.GetTargetPath())
+	err = cfsServer.persistClientConf(stagingTargetPath)
 	if err != nil {
 		klog.Errorf("persist client config file fail, err: %v", err)
 		return nil, status.Errorf(codes.Internal, "persist client config file fail, err: %v", err)
 	}
 
-	if err = doMount(cfsServer); err != nil {
+	if err = mountVolume(cfsServer); err != nil {
 		klog.Errorf("mount fail, err: %v", err)
 		return nil, status.Errorf(codes.Internal, "mount fail, err: %v", err)
 	}
 
-	return &csi.NodePublishVolumeResponse{}, nil
-}
-
-func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
-	klog.Infof("NodeUnpublishVolume req:%v", req)
-	targetPath := req.GetTargetPath()
-	hasMount, err := hasMount(targetPath)
-	if err != nil {
-		klog.Errorf("check mount status error, %v", err)
-		return nil, status.Errorf(codes.Internal, "check mount status error, %v", err)
-	}
-
-	if hasMount {
-		err = mount.New("").Unmount(req.GetTargetPath())
-		if err != nil {
-			klog.Errorf("unmount error, %v", err)
-			return nil, status.Errorf(codes.Internal, "unmount error, %v", err)
-		}
-	}
-
-	return &csi.NodeUnpublishVolumeResponse{}, nil
-}
-
-func doMount(cfsServer *cfsServer) error {
-	return cfsServer.runClient()
-}
-
-func (ns *nodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
-	klog.Infof("NodeStageVolume req:%v", req)
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
 func (ns *nodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
 	klog.Infof("NodeUnstageVolume req:%v", req)
+	stagingTargetPath := req.GetStagingTargetPath()
+	err := umountVolume(stagingTargetPath)
+	if err != nil {
+		klog.Errorf("umount stagingTargetPath[%v] fail, %v", stagingTargetPath, err)
+		return nil, status.Errorf(codes.Internal, "umount stagingTargetPath[%v] fail, %v", stagingTargetPath, err)
+	}
+
+	_ = os.Remove(stagingTargetPath)
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 

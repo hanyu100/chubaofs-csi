@@ -5,8 +5,8 @@ metadata:
 provisioner: csi.chubaofs.com
 reclaimPolicy: Delete
 parameters:
-  masterAddr: "master-service.chubaofs.svc.cluster.local:8080"
-  owner: "csi-user"
+  masterAddr: "master-service.chubaofs.svc.cluster.local:17010"
+  owner: "csiuser"
   # cannot set profPort and exporterPort value, reason: a node may be run many cfs-client
   #  profPort: "10094"
   #  exporterPort: "9513"
