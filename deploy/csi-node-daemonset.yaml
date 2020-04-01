@@ -73,7 +73,7 @@ spec:
             - name: socket-dir
               mountPath: /csi
         - name: node
-          image: chubaofs/cfs-csi-driver:1.0.6
+          image: chubaofs/cfs-csi-driver:1.0.7
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
