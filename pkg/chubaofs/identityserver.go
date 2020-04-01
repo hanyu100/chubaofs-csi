@@ -16,6 +16,7 @@ package chubaofs
 import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"golang.org/x/net/context"
+	"k8s.io/klog"
 )
 
 type identityServer struct {
@@ -34,6 +35,7 @@ func NewIdentityServer(driver *driver) *identityServer {
 }
 
 func (ids *identityServer) GetPluginInfo(ctx context.Context, req *csi.GetPluginInfoRequest) (*csi.GetPluginInfoResponse, error) {
+	klog.Infof("GetPluginInfo req:%v", req)
 	return &csi.GetPluginInfoResponse{
 		Name:          ids.name,
 		VendorVersion: ids.version,
@@ -41,10 +43,12 @@ func (ids *identityServer) GetPluginInfo(ctx context.Context, req *csi.GetPlugin
 }
 
 func (ids *identityServer) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeResponse, error) {
+	klog.Infof("Probe req:%v", req)
 	return &csi.ProbeResponse{}, nil
 }
 
 func (ids *identityServer) GetPluginCapabilities(ctx context.Context, req *csi.GetPluginCapabilitiesRequest) (*csi.GetPluginCapabilitiesResponse, error) {
+	klog.Infof("GetPluginCapabilities req:%v", req)
 	return &csi.GetPluginCapabilitiesResponse{
 		Capabilities: []*csi.PluginCapability{
 			{

@@ -15,7 +15,6 @@ package chubaofs
 
 import (
 	"context"
-	"fmt"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -40,6 +39,7 @@ func NewControllerServer(driver *driver) csi.ControllerServer {
 }
 
 func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+	klog.Infof("CreateVolume req:%v", req)
 	if err := cs.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME); err != nil {
 		return nil, err
 	}
@@ -72,6 +72,7 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 }
 
 func (cs *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
+	klog.Infof("DeleteVolume req:%v", req)
 	if err := cs.validateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME); err != nil {
 		return nil, err
 	}
@@ -79,13 +80,15 @@ func (cs *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	volumeId := req.VolumeId
 	persistentVolume, err := cs.driver.queryPersistentVolumes(volumeId)
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("not found PersistentVolume[%v], error:%v", volumeId, err))
+		klog.Fatalf("not found PersistentVolume[%v], error:%v", volumeId, err)
+		return nil, status.Errorf(codes.InvalidArgument, "not found PersistentVolume[%v], error:%v", volumeId, err)
 	}
 
 	param := persistentVolume.Spec.CSI.VolumeAttributes
 	cfsServer, err := newCfsServer(volumeId, param)
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		klog.Fatalf("new cfs server error, %v", err)
+		return nil, status.Errorf(codes.InvalidArgument, "new cfs server error, %v", err)
 	}
 
 	err = cfsServer.deleteVolume()
@@ -114,15 +117,18 @@ func (cs *controllerServer) deleteLegacyVolume(cfsServer *cfsServer) {
 }
 
 func (cs *controllerServer) ControllerGetCapabilities(ctx context.Context, req *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
+	klog.Infof("ControllerGetCapabilities req:%v", req)
 	return &csi.ControllerGetCapabilitiesResponse{
 		Capabilities: cs.caps,
 	}, nil
 }
 
 func (cs *controllerServer) ValidateVolumeCapabilities(ctx context.Context, req *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
+	klog.Infof("ValidateVolumeCapabilities req:%v", req)
 	for _, _cap := range req.VolumeCapabilities {
 		if _cap.GetAccessMode().GetMode() != csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER {
-			return nil, status.Error(codes.InvalidArgument, "no multi node multi writer capability")
+			klog.Warning("no multi node multi writer capability")
+			return nil, status.Errorf(codes.InvalidArgument, "no multi node multi writer capability")
 		}
 	}
 
@@ -145,6 +151,8 @@ func (cs *controllerServer) validateControllerServiceRequest(c csi.ControllerSer
 			return nil
 		}
 	}
+
+	klog.Warningf("unsupported capability %s", c)
 	return status.Errorf(codes.InvalidArgument, "unsupported capability %s", c)
 }
 

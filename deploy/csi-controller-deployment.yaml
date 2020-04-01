@@ -116,7 +116,7 @@ spec:
             - name: socket-dir
               mountPath: /csi
         - name: controller
-          image: chubaofs/cfs-csi-driver:1.0.0
+          image: chubaofs/cfs-csi-driver:1.0.2
           imagePullPolicy: "IfNotPresent"
           securityContext:
             privileged: true

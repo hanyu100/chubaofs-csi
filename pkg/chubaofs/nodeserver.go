@@ -14,13 +14,12 @@
 package chubaofs
 
 import (
-	"fmt"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/klog"
 	"k8s.io/utils/mount"
-	"os"
 )
 
 type nodeServer struct {
@@ -37,23 +36,34 @@ func NewNodeServer(driver *driver) *nodeServer {
 }
 
 func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+	klog.Infof("NodePublishVolume req:%v", req)
+	targetPath := req.GetTargetPath()
+	hasMount, err := hasMount(targetPath)
+	if err != nil {
+		klog.Errorf("check mount status error, %v", err)
+		return nil, status.Errorf(codes.Internal, "check mount status error, %v", err)
+	}
+
+	if hasMount {
+		return &csi.NodePublishVolumeResponse{}, nil
+	}
+
 	volumeId := req.GetVolumeId()
 	param := req.GetVolumeContext()
 	cfsServer, err := newCfsServer(volumeId, param)
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
-	if PathExists(cfsServer.clientConfFile) {
-		return &csi.NodePublishVolumeResponse{}, nil
+		klog.Errorf("new cfs server error, %v", err)
+		return nil, status.Errorf(codes.InvalidArgument, "new cfs server error, %v", err)
 	}
 
 	err = cfsServer.persistClientConf(req.GetTargetPath())
 	if err != nil {
+		klog.Errorf("persist client config file fail, err: %v", err)
 		return nil, status.Errorf(codes.Internal, "persist client config file fail, err: %v", err)
 	}
 
 	if err = doMount(cfsServer); err != nil {
+		klog.Errorf("mount fail, err: %v", err)
 		return nil, status.Errorf(codes.Internal, "mount fail, err: %v", err)
 	}
 
@@ -61,24 +71,20 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 }
 
 func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+	klog.Infof("NodeUnpublishVolume req:%v", req)
 	targetPath := req.GetTargetPath()
-	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
+	hasMount, err := hasMount(targetPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, status.Error(codes.NotFound, fmt.Sprintf("targetPath[%v] not found", targetPath))
-		} else {
-			return nil, status.Error(codes.Internal, err.Error())
+		klog.Errorf("check mount status error, %v", err)
+		return nil, status.Errorf(codes.Internal, "check mount status error, %v", err)
+	}
+
+	if hasMount {
+		err = mount.New("").Unmount(req.GetTargetPath())
+		if err != nil {
+			klog.Errorf("unmount error, %v", err)
+			return nil, status.Errorf(codes.Internal, "unmount error, %v", err)
 		}
-	}
-
-	//assuming success if already unmounted
-	if notMnt {
-		return &csi.NodeUnpublishVolumeResponse{}, nil
-	}
-
-	err = mount.New("").Unmount(req.GetTargetPath())
-	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
@@ -89,20 +95,24 @@ func doMount(cfsServer *cfsServer) error {
 }
 
 func (ns *nodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+	klog.Infof("NodeStageVolume req:%v", req)
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
 func (ns *nodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
+	klog.Infof("NodeUnstageVolume req:%v", req)
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
 func (ns *nodeServer) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
+	klog.Infof("NodeGetInfo req:%v", req)
 	return &csi.NodeGetInfoResponse{
 		NodeId: ns.nodeID,
 	}, nil
 }
 
 func (ns *nodeServer) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
+	klog.Infof("NodeGetCapabilities req:%v", req)
 	return &csi.NodeGetCapabilitiesResponse{
 		Capabilities: []*csi.NodeServiceCapability{
 			{
