@@ -105,7 +105,7 @@ func (ns *nodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	cfgmap[FUSE_KEY_MOUNT_POINT] = stagingTargetPath
 	cfgmap[FUSE_KEY_VOLUME_NAME] = volumeName
 	cfgmap[FUSE_KEY_MASTER_ADDR] = ns.masterAddress
-	cfgmap[FUSE_KEY_LOG_PATH] = "/cfs/conf/" + volumeName
+	cfgmap[FUSE_KEY_LOG_PATH] = "/cfs/logs/" + volumeName
 	cfgmap[FUSE_KEY_LOG_LEVEL] = "error"
 	cfgmap[FUSE_KEY_LOOKUP_VALID] = "30"
 	cfgmap[FUSE_KEY_OWNER] = "cfs"
